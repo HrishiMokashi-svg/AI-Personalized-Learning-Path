@@ -1,2 +1,2 @@
 # AI-Personalized-Learning-Path
-<h4> this is my first repo</h4>
+<h4> This is my first Project</h4>
