@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LearnAI - Dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">🎓 LearnAI</div>
+    <nav class="nav" id="nav">
+      <button data-page="home" class="active">🏠 Dashboard</button>
+      <button data-page="profile">👤 Student Profile</button>
+      <button data-page="skills">📝 Skill Form</button>
+      <button data-page="path">🧭 Learning Path</button>
+      <button data-page="courses">📚 Courses</button>
+      <button data-page="videos">▶️ Video Lectures</button>
+      <button data-page="quiz">❓ Quiz</button>
+      <button data-page="performance">📈 Performance</button>
+      <button data-page="progress">✅ Progress</button>
+      <button data-page="tutor">🤖 AI Tutor (RAG)</button>
+    </nav>
+    <button class="logout" onclick="logout()">Logout</button>
+  </aside>
+  <main class="main">
+    <div class="topbar"><h1 id="pageTitle">Dashboard</h1><span class="muted" id="hello"></span></div>
+    <div id="view"></div>
+  </main>
+</div>
+<script src="js/api.js"></script>
+<script src="js/dashboard.js"></script>
+</body>
+</html>

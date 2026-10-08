@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LearnAI - Login</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="hero">
+    <h1>🎓 LearnAI</h1>
+    <p>Your AI-powered personalized learning path. Tell us your interests, strengths and weaknesses and we build a plan made just for you.</p>
+    <ul><li>✔ Personalized AI learning path</li><li>✔ Course syllabi and video lectures</li><li>✔ Quizzes &amp; performance tracking</li><li>✔ AI tutor powered by RAG</li></ul>
+  </div>
+  <div class="auth-box">
+    <div class="auth-card">
+      <h2 id="title">Welcome back</h2>
+      <p class="sub" id="sub">Login to continue learning</p>
+      <div id="nameWrap" class="hidden"><label>Full name</label><input id="name" placeholder="Your name"></div>
+      <label>Email</label><input id="email" type="email" placeholder="you@example.com">
+      <label>Password</label><input id="password" type="password" placeholder="Min 6 characters">
+      <button class="btn" id="submit">Login</button>
+      <div id="msg" class="msg"></div>
+      <div class="switch"><span id="swText">New here?</span> <a id="swLink">Create account</a></div>
+    </div>
+  </div>
+</div>
+<script src="js/api.js"></script>
+<script>
+if (getToken()) location.href = "dashboard.html";
+let mode = "login";
+const $ = id => document.getElementById(id);
+function setMode(m) {
+  mode = m;
+  const reg = m === "register";
+  $("nameWrap").classList.toggle("hidden", !reg);
+  $("title").textContent = reg ? "Create account" : "Welcome back";
+  $("sub").textContent = reg ? "Start your personalized journey" : "Login to continue learning";
+  $("submit").textContent = reg ? "Register" : "Login";
+  $("swText").textContent = reg ? "Already have an account?" : "New here?";
+  $("swLink").textContent = reg ? "Login" : "Create account";
+  $("msg").className = "msg";
+}
+$("swLink").onclick = () => setMode(mode === "login" ? "register" : "login");
+async function submit() {
+  const btn = $("submit"); btn.disabled = true;
+  try {
+    const email = $("email").value.trim(), password = $("password").value;
+    if (!email || !password) throw new Error("Please enter email and password");
+    let data;
+    if (mode === "register") {
+      const name = $("name").value.trim();
+      if (name.length < 2) throw new Error("Please enter your name");
+      data = await api("/auth/register", "POST", { name, email, password });
+    } else {
+      data = await api("/auth/login", "POST", { email, password });
+    }
+    saveSession(data);
+    location.href = "dashboard.html";
+  } catch (e) {
+    $("msg").textContent = e.message; $("msg").className = "msg err";
+  } finally { btn.disabled = false; }
+}
+$("submit").onclick = submit;
+document.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+</script>
+</body>
+</html>
