@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 load_dotenv()
 SECRET = os.getenv("JWT_SECRET", "dev-secret")
 EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))

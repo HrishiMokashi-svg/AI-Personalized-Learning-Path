@@ -1,4 +1,6 @@
 """RAG: chunk -> embed -> store in MySQL -> retrieve by cosine similarity."""
+import json
+import logging
 import math
 import os
 import re
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 import api_calling
 from models import KBChunk
 
+logger = logging.getLogger("learnai.rag")
 KB_DIR = os.path.join(os.path.dirname(__file__), "kb")
 
 
@@ -27,18 +30,29 @@ def ingest_kb(db: Session) -> dict:
     """Load every .md/.txt file in kb/ into kb_chunks (skips files already ingested)."""
     added = 0
     embedded = 0
+    if not os.path.isdir(KB_DIR):
+        logger.warning(f"KB directory not found at: {KB_DIR}")
+        return {"chunks_added": 0, "embedded": 0, "warning": "KB directory missing"}
+
     for fname in sorted(os.listdir(KB_DIR)):
         if not fname.endswith((".md", ".txt")):
             continue
         if db.query(KBChunk).filter(KBChunk.source == fname).first():
             continue
-        with open(os.path.join(KB_DIR, fname), encoding="utf-8") as f:
-            chunks = chunk_text(f.read())
+        file_path = os.path.join(KB_DIR, fname)
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                chunks = chunk_text(f.read())
+        except Exception as e:
+            logger.error(f"Error reading {file_path}: {e}")
+            continue
+
         for i, ch in enumerate(chunks):
             try:
                 vec = api_calling.embed_text(ch)
                 embedded += 1
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Embedding failed for chunk in {fname}: {e}")
                 vec = None  # keyword fallback will be used
             db.add(KBChunk(source=fname, chunk_index=i, content=ch, embedding=vec))
             added += 1
@@ -47,6 +61,8 @@ def ingest_kb(db: Session) -> dict:
 
 
 def _cosine(a, b):
+    if not a or not b or len(a) != len(b):
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
@@ -66,15 +82,24 @@ def retrieve(db: Session, query: str, k: int = 4) -> list[dict]:
     qvec = None
     try:
         qvec = api_calling.embed_text(query)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Query embedding skipped: {e}")
+
     scored = []
     for c in chunks:
-        if qvec and c.embedding:
-            s = _cosine(qvec, c.embedding)
+        vec = c.embedding
+        if isinstance(vec, str):
+            try:
+                vec = json.loads(vec)
+            except Exception:
+                vec = None
+
+        if qvec and vec and len(qvec) == len(vec):
+            s = _cosine(qvec, vec)
         else:
             s = _keyword_score(query, c.content)
         scored.append((s, c))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     return [{"source": c.source, "content": c.content, "score": round(s, 3)}
             for s, c in scored[:k]]

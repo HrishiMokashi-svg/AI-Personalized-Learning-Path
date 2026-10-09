@@ -14,6 +14,7 @@
       <button data-page="home" class="active">🏠 Dashboard</button>
       <button data-page="profile">👤 Student Profile</button>
       <button data-page="skills">📝 Skill Form</button>
+      <button data-page="recommendations">🎯 Recommendations</button>
       <button data-page="path">🧭 Learning Path</button>
       <button data-page="courses">📚 Courses</button>
       <button data-page="videos">▶️ Video Lectures</button>
@@ -26,13 +27,20 @@
     <button class="logout" onclick="logout()">Logout</button>
   </aside>
   <main class="main">
-    <div class="topbar"><h1 id="pageTitle">Dashboard</h1><span class="muted" id="hello"></span></div>
+    <div class="topbar">
+      <h1 id="pageTitle">Dashboard</h1>
+      <span class="muted" id="hello"></span>
+    </div>
+    <div id="apiNotice" class="msg" style="margin-bottom:16px;background:#fef3c7;color:#92400e;display:none">
+      <strong>Backend URL Not Configured</strong> —
+      <small>Set <code>window.LEARNAI_API_URL</code> in <code>js/config.js</code> or configure it in <a href="#settings" onclick="go('settings');return false" style="color:var(--primary);font-weight:700">Settings</a>.</small>
+    </div>
     <div id="view"></div>
   </main>
 </div>
-<script src="js/config.js?v=1"></script>
-<script src="js/api.js?v=4"></script>
+<script src="js/config.js?v=2"></script>
+<script src="js/api.js?v=6"></script>
 <script src="js/i18n.js?v=4"></script>
-<script src="js/dashboard.js?v=7"></script>
+<script src="js/dashboard.js?v=8"></script>
 </body>
 </html>

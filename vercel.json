@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/api/:match*", "destination": "/api/index.py" },
+    { "source": "/health", "destination": "/api/index.py" },
+    { "source": "/docs", "destination": "/api/index.py" },
+    { "source": "/openapi.json", "destination": "/api/index.py" },
+    { "source": "/", "destination": "/Frontend/index.html" },
+    { "source": "/login", "destination": "/Frontend/index.html" },
+    { "source": "/register", "destination": "/Frontend/index.html#register" },
+    { "source": "/dashboard", "destination": "/Frontend/dashboard.html" },
+    { "source": "/profile", "destination": "/Frontend/dashboard.html#profile" },
+    { "source": "/skills", "destination": "/Frontend/dashboard.html#skills" },
+    { "source": "/recommendations", "destination": "/Frontend/dashboard.html#recommendations" },
+    { "source": "/path", "destination": "/Frontend/dashboard.html#path" },
+    { "source": "/learning-path", "destination": "/Frontend/dashboard.html#path" },
+    { "source": "/courses", "destination": "/Frontend/dashboard.html#courses" },
+    { "source": "/videos", "destination": "/Frontend/dashboard.html#videos" },
+    { "source": "/quiz", "destination": "/Frontend/dashboard.html#quiz" },
+    { "source": "/performance", "destination": "/Frontend/dashboard.html#performance" },
+    { "source": "/progress", "destination": "/Frontend/dashboard.html#progress" },
+    { "source": "/tutor", "destination": "/Frontend/dashboard.html#tutor" },
+    { "source": "/settings", "destination": "/Frontend/dashboard.html#settings" },
+    { "source": "/css/:match*", "destination": "/Frontend/css/:match*" },
+    { "source": "/js/:match*", "destination": "/Frontend/js/:match*" },
+    { "source": "/Frontend/:match*", "destination": "/Frontend/:match*" }
+  ]
+}

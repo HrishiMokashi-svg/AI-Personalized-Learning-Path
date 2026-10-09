@@ -1,18 +1,25 @@
 @echo off
-title AI Personalized Learning Path
+title AI Personalized Learning Path - Backend
+cd /d "%~dp0"
 
-echo Starting Backend...
-start "Backend" cmd /k "cd /d %~dp0backend && python -m uvicorn main:app --reload"
+echo ==========================================
+echo   LearnAI Backend (FastAPI)
+echo ==========================================
 
-timeout /t 2 /nobreak >nul
+REM Detect python executable
+if exist ".venv\Scripts\python.exe" (
+  set "PY_CMD=.venv\Scripts\python.exe"
+) else if exist "..\.venv\Scripts\python.exe" (
+  set "PY_CMD=..\.venv\Scripts\python.exe"
+) else (
+  set "PY_CMD=python"
+)
 
-echo Starting Frontend...
-start "Frontend" cmd /k "cd /d %~dp0frontend && python -m http.server 5500"
+REM Free port 8000 if already occupied by stale server
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING"') do (
+  taskkill /F /PID %%a >nul 2>&1
+)
 
-echo.
-echo Both servers are starting!
-echo Frontend: http://127.0.0.1:5500
-echo Backend:  http://127.0.0.1:8000
-echo API Docs: http://127.0.0.1:8000/docs
-
+echo Starting uvicorn on http://127.0.0.1:8000 ...
+"%PY_CMD%" -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 pause

@@ -1,5 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": null,
-  "outputDirectory": "."
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/register", "destination": "/index.html#register" },
+    { "source": "/dashboard", "destination": "/dashboard.html" },
+    { "source": "/profile", "destination": "/dashboard.html#profile" },
+    { "source": "/skills", "destination": "/dashboard.html#skills" },
+    { "source": "/recommendations", "destination": "/dashboard.html#recommendations" },
+    { "source": "/path", "destination": "/dashboard.html#path" },
+    { "source": "/learning-path", "destination": "/dashboard.html#path" },
+    { "source": "/courses", "destination": "/dashboard.html#courses" },
+    { "source": "/videos", "destination": "/dashboard.html#videos" },
+    { "source": "/quiz", "destination": "/dashboard.html#quiz" },
+    { "source": "/performance", "destination": "/dashboard.html#performance" },
+    { "source": "/progress", "destination": "/dashboard.html#progress" },
+    { "source": "/tutor", "destination": "/dashboard.html#tutor" },
+    { "source": "/settings", "destination": "/dashboard.html#settings" }
+  ]
 }

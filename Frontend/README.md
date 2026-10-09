@@ -7,4 +7,6 @@ Run `start.bat` (serves the frontend on http://127.0.0.1:5500). The local API de
 ## Deploying the frontend to Vercel
 Create a Vercel project from this repository with **Root Directory** set to `Frontend`, **Framework Preset** set to `Other`, **Build Command** unset/disabled, and **Output Directory** set to `.`. `vercel.json` sets the no-build static output as well.
 
-The FastAPI backend is not part of this static deployment. Deploy it as a separate service, then put its public base URL (including `https://`, without a trailing slash) in `js/config.js` as the value of `window.LEARNAI_API_URL`, and redeploy the frontend. This URL is public configuration, not a secret; do not put API keys or `.env` values in the frontend.
+The FastAPI backend is not part of this static deployment. Deploy it as a separate service, then set `window.LEARNAI_API_URL` in `js/config.js` to that service's public base URL (including `https://`, without a trailing slash), and redeploy the frontend. Do not use a localhost address there.
+
+Because this is plain static HTML/JavaScript with no build step, browser JavaScript cannot read Vercel server environment variables directly. `js/config.js` is the single public runtime configuration point for the backend URL; Vercel environment variables do not automatically replace it. This URL is public configuration, not a secret. Keep API keys and `.env` values on the backend.

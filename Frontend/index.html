@@ -10,10 +10,19 @@
   <div class="hero">
     <h1>🎓 LearnAI</h1>
     <p>Your AI-powered personalized learning path. Tell us your interests, strengths and weaknesses and we build a plan made just for you.</p>
-    <ul><li>✔ Personalized AI learning path</li><li>✔ Course syllabi and video lectures</li><li>✔ Quizzes &amp; performance tracking</li><li>✔ AI tutor powered by RAG</li></ul>
+    <ul>
+      <li>✔ Personalized AI learning path</li>
+      <li>✔ Course syllabi and video lectures</li>
+      <li>✔ Quizzes &amp; performance tracking</li>
+      <li>✔ AI tutor powered by RAG</li>
+    </ul>
   </div>
   <div class="auth-box">
     <div class="auth-card">
+      <div id="apiNotice" class="msg" style="margin-bottom:12px;background:#fef3c7;color:#92400e;display:none">
+        <strong>Backend URL Not Configured</strong><br>
+        <small>Set <code>window.LEARNAI_API_URL</code> in <code>js/config.js</code> or <a href="#" id="setApiLink" style="color:var(--primary);font-weight:700">enter your backend URL here</a>.</small>
+      </div>
       <h2 id="title">Welcome back</h2>
       <p class="sub" id="sub">Login to continue learning</p>
       <div id="nameWrap" class="hidden"><label>Full name</label><input id="name" placeholder="Your name"></div>
@@ -25,13 +34,14 @@
     </div>
   </div>
 </div>
-<script src="js/config.js?v=1"></script>
-<script src="js/api.js?v=4"></script>
+<script src="js/config.js?v=2"></script>
+<script src="js/api.js?v=6"></script>
 <script src="js/i18n.js?v=4"></script>
 <script>
 if (getToken()) location.href = "dashboard.html";
-let mode = "login";
+let mode = location.hash === "#register" ? "register" : "login";
 const $ = id => document.getElementById(id);
+
 function setMode(m) {
   mode = m;
   const reg = m === "register";
@@ -42,8 +52,43 @@ function setMode(m) {
   $("swText").textContent = reg ? "Already have an account?" : "New here?";
   $("swLink").textContent = reg ? "Login" : "Create account";
   $("msg").className = "msg";
+  if (history.replaceState) {
+    history.replaceState(null, "", reg ? "#register" : "#login");
+  }
 }
+
+if (mode === "register") setMode("register");
+
+window.addEventListener("hashchange", () => {
+  if (location.hash === "#register" && mode !== "register") setMode("register");
+  if (location.hash === "#login" && mode !== "login") setMode("login");
+});
+
 $("swLink").onclick = () => setMode(mode === "login" ? "register" : "login");
+
+// Check for expired session notice
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get("expired")) {
+  $("msg").textContent = "Your session has expired. Please login again.";
+  $("msg").className = "msg err";
+}
+
+// Check for missing backend in production
+if (!getApiUrl() && !isLocalHost()) {
+  $("apiNotice").style.display = "block";
+  $("setApiLink").onclick = e => {
+    e.preventDefault();
+    const current = getApiUrl();
+    const entered = prompt("Enter your deployed backend URL (e.g. https://my-backend.onrender.com):", current);
+    if (entered) {
+      setApiUrl(entered);
+      $("apiNotice").style.display = "none";
+      $("msg").textContent = "Backend URL saved: " + getApiUrl();
+      $("msg").className = "msg ok";
+    }
+  };
+}
+
 async function submit() {
   const btn = $("submit"); btn.disabled = true;
   try {

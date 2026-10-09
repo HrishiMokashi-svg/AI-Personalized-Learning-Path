@@ -1,10 +1,59 @@
-const LOCAL_API_URL = "http://127.0.0.1:8000";
-const isLocalFrontend = ["localhost", "127.0.0.1"].includes(location.hostname);
-const configuredApiUrl = typeof window.LEARNAI_API_URL === "string"
-  ? window.LEARNAI_API_URL.trim().replace(/\/+$/, "")
-  : "";
-const API_URL = configuredApiUrl || (isLocalFrontend ? LOCAL_API_URL : "");
-window.API_URL = API_URL;
+function isLocalHost(host = location.hostname) {
+  return (
+    ["localhost", "127.0.0.1", "[::1]", "::1", ""].includes(host) ||
+    host.startsWith("192.168.") ||
+    host.startsWith("10.") ||
+    host.startsWith("172.") ||
+    host.endsWith(".local")
+  );
+}
+
+// Check for optional ?api_url= parameter in URL for seamless linking
+try {
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramApiUrl = urlParams.get("api_url");
+  if (paramApiUrl && paramApiUrl.trim()) {
+    localStorage.setItem("learnai_api_url", paramApiUrl.trim().replace(/\/+$/, ""));
+  }
+} catch (e) {}
+
+function getApiUrl() {
+  // 1. window.LEARNAI_API_URL set in js/config.js
+  const configUrl = typeof window.LEARNAI_API_URL === "string" ? window.LEARNAI_API_URL.trim().replace(/\/+$/, "") : "";
+  if (configUrl) return configUrl;
+
+  // 2. Saved URL from Settings in localStorage
+  const savedUrl = (localStorage.getItem("learnai_api_url") || "").trim().replace(/\/+$/, "");
+  if (savedUrl) return savedUrl;
+
+  // 3. Localhost development fallback
+  if (isLocalHost()) {
+    const host = location.hostname || "127.0.0.1";
+    return `http://${host}:8000`;
+  }
+
+  // 4. In production without explicit config, fallback to current origin for full-stack deployment
+  if (typeof location !== "undefined" && location.origin && location.origin.startsWith("http")) {
+    return location.origin;
+  }
+
+  return "";
+}
+
+function setApiUrl(url) {
+  const cleaned = (url || "").trim().replace(/\/+$/, "");
+  if (cleaned) {
+    localStorage.setItem("learnai_api_url", cleaned);
+  } else {
+    localStorage.removeItem("learnai_api_url");
+  }
+  window.API_URL = getApiUrl();
+  return window.API_URL;
+}
+
+window.getApiUrl = getApiUrl;
+window.setApiUrl = setApiUrl;
+window.API_URL = getApiUrl();
 
 const THEME_STORAGE_KEY = "learnai_theme";
 const LANGUAGE_STORAGE_KEY = "learnai_language";
@@ -55,32 +104,52 @@ function saveSession(data) {
   }
 }
 
-function logout() {
+function logout(isExpired = false) {
   localStorage.removeItem("token");
   localStorage.removeItem("learnai_token");
   localStorage.removeItem("learnai_user");
-  location.href = "index.html";
+  location.href = isExpired ? "index.html?expired=1" : "index.html";
 }
 
 async function api(path, method = "GET", body = null) {
-  if (!API_URL) {
-    throw new Error("Backend API URL is not configured. Set LEARNAI_API_URL in js/config.js to your deployed backend URL.");
+  const base = getApiUrl();
+  if (!base) {
+    throw new Error("Backend API URL is not configured. Please enter your deployed backend URL in Settings or in js/config.js.");
   }
   const headers = { "Content-Type": "application/json" };
   const t = getToken();
   if (t) headers["Authorization"] = "Bearer " + t;
+
+  // Route through /api prefix on same-origin cloud deployments to avoid collisions with HTML routes
+  let url = base + path;
+  if (typeof location !== "undefined" && base === location.origin && !path.startsWith("/api")) {
+    url = base + "/api" + path;
+  }
+
   let res;
   try {
-    res = await fetch(API_URL + path, { method, headers, body: body ? JSON.stringify(body) : null });
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : null
+    });
   } catch (e) {
-    const localHint = isLocalFrontend ? " Is the backend running (start.bat)?" : "";
-    throw new Error("Cannot reach the backend at " + API_URL + "." + localHint);
+    const isLocal = isLocalHost();
+    const hint = isLocal
+      ? " Please verify the backend is running (start.bat on port 8000)."
+      : " Please verify your backend service is running and CORS is enabled.";
+    throw new Error(`Unable to connect to backend at ${base}.${hint}`);
   }
-  if (res.status === 401 && path.indexOf("/auth/") !== 0) { logout(); throw new Error("Session expired"); }
+
+  if (res.status === 401 && path.indexOf("/auth/") !== 0) {
+    logout(true);
+    throw new Error("Your session has expired. Please log in again.");
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    let msg = data.detail || "Request failed";
-    if (Array.isArray(msg)) msg = msg.map(m => m.msg).join(", ");
+    let msg = data.detail || data.message || "Request failed";
+    if (Array.isArray(msg)) msg = msg.map(m => m.msg || JSON.stringify(m)).join(", ");
     throw new Error(msg);
   }
   return data;

@@ -1,7 +1,8 @@
+import os
 import re
 from collections import defaultdict
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,7 +19,41 @@ from schemas import (AccountDeleteIn, AccountUpdateIn, ChatIn, LoginIn,
 from seed import seed
 
 app = FastAPI(title="LearnAI - AI Personalized Learning Path API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Configure CORS origins
+cors_env = os.getenv("CORS_ORIGINS", "").strip()
+allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()] if cors_env else []
+dev_origins = [
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+for o in dev_origins:
+    if o not in allowed_origins:
+        allowed_origins.append(o)
+
+if cors_env == "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_origin_regex=r"^https?:\/\/(.*\.vercel\.app|.*\.onrender\.com|.*\.railway\.app|localhost.*|127\.0\.0\.1.*)$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")
@@ -40,13 +75,16 @@ def root():
     return {"message": "LearnAI API is running", "docs": "/docs", "health": "/health"}
 
 
-@app.get("/health")
+api_router = APIRouter()
+
+
+@api_router.get("/health")
 def health():
     return {"status": "ok"}
 
 
 # ---------------- AUTH ----------------
-@app.post("/auth/register")
+@api_router.post("/auth/register")
 def register(data: RegisterIn, db: Session = Depends(get_db)):
     user = User(name=data.name.strip(), email=data.email.lower(), password_hash=hash_password(data.password))
     db.add(user)
@@ -60,7 +98,7 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
     return {"token": create_token(user.id), "user": {"id": user.id, "name": user.name, "email": user.email}}
 
 
-@app.post("/auth/login")
+@api_router.post("/auth/login")
 def login(data: LoginIn, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email.lower()).first()
     if not user or not verify_password(data.password, user.password_hash):
@@ -68,7 +106,7 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     return {"token": create_token(user.id), "user": {"id": user.id, "name": user.name, "email": user.email}}
 
 
-@app.put("/account")
+@api_router.put("/account")
 def update_account(data: AccountUpdateIn, user: User = Depends(current_user),
                    db: Session = Depends(get_db)):
     name = data.name.strip()
@@ -84,7 +122,7 @@ def update_account(data: AccountUpdateIn, user: User = Depends(current_user),
     return {"id": user.id, "name": user.name, "email": user.email}
 
 
-@app.put("/account/password")
+@api_router.put("/account/password")
 def change_password(data: PasswordChangeIn, user: User = Depends(current_user),
                     db: Session = Depends(get_db)):
     if not verify_password(data.current_password, user.password_hash):
@@ -94,7 +132,7 @@ def change_password(data: PasswordChangeIn, user: User = Depends(current_user),
     return {"message": "Password updated"}
 
 
-@app.delete("/account")
+@api_router.delete("/account")
 def delete_account(data: AccountDeleteIn, user: User = Depends(current_user),
                    db: Session = Depends(get_db)):
     if not verify_password(data.password, user.password_hash):
@@ -121,13 +159,14 @@ def _get_profile(db, user):
     return p
 
 
-@app.get("/me")
+@api_router.get("/me")
 def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    joined_str = user.created_at.isoformat() if user.created_at else ""
     return {"id": user.id, "name": user.name, "email": user.email,
-            "joined": user.created_at.isoformat(), "profile": _profile_dict(_get_profile(db, user))}
+            "joined": joined_str, "profile": _profile_dict(_get_profile(db, user))}
 
 
-@app.put("/profile")
+@api_router.put("/profile")
 def save_profile(data: ProfileIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = _get_profile(db, user)
     for k, v in data.model_dump().items():
@@ -143,7 +182,7 @@ def _course_dict(c: Course):
             "description": c.description, "syllabus": c.lessons or []}
 
 
-@app.get("/courses")
+@api_router.get("/courses")
 def courses(user: User = Depends(current_user), db: Session = Depends(get_db)):
     enrolled = {e.course_id: e.progress for e in db.query(Enrollment).filter(Enrollment.user_id == user.id)}
     out = []
@@ -155,7 +194,19 @@ def courses(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return out
 
 
-@app.post("/courses/{course_id}/enroll")
+@api_router.get("/courses/{course_id}")
+def get_course(course_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    c = db.get(Course, course_id)
+    if not c:
+        raise HTTPException(404, "Course not found")
+    d = _course_dict(c)
+    e = db.query(Enrollment).filter_by(user_id=user.id, course_id=course_id).first()
+    d["enrolled"] = bool(e)
+    d["progress"] = e.progress if e else 0
+    return d
+
+
+@api_router.post("/courses/{course_id}/enroll")
 def enroll(course_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if not db.get(Course, course_id):
         raise HTTPException(404, "Course not found")
@@ -165,7 +216,7 @@ def enroll(course_id: int, user: User = Depends(current_user), db: Session = Dep
     return {"ok": True}
 
 
-@app.put("/progress/{course_id}")
+@api_router.put("/progress/{course_id}")
 def update_progress(course_id: int, data: ProgressIn, user: User = Depends(current_user),
                     db: Session = Depends(get_db)):
     e = db.query(Enrollment).filter_by(user_id=user.id, course_id=course_id).first()
@@ -176,7 +227,7 @@ def update_progress(course_id: int, data: ProgressIn, user: User = Depends(curre
     return {"ok": True, "progress": e.progress}
 
 
-@app.get("/progress")
+@api_router.get("/progress")
 def progress(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = (db.query(Enrollment, Course).join(Course, Course.id == Enrollment.course_id)
             .filter(Enrollment.user_id == user.id).all())
@@ -191,7 +242,7 @@ def _tokens(text: str):
     return {t for t in re.findall(r"[a-z0-9+#]+", (text or "").lower()) if len(t) > 2}
 
 
-@app.get("/recommendations")
+@api_router.get("/recommendations")
 def recommendations(user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = _get_profile(db, user)
     interest = _tokens(p.interests) | _tokens(p.goal)
@@ -221,12 +272,12 @@ def recommendations(user: User = Depends(current_user), db: Session = Depends(ge
 
 
 # ---------------- QUIZ / PERFORMANCE ----------------
-@app.get("/quiz/topics")
+@api_router.get("/quiz/topics")
 def quiz_topics(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return [t[0] for t in db.query(QuizQuestion.topic).distinct().all()]
 
 
-@app.get("/quiz/questions")
+@api_router.get("/quiz/questions")
 def quiz_questions(topic: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     qs = db.query(QuizQuestion).filter(QuizQuestion.topic == topic).all()
     if not qs:
@@ -234,7 +285,7 @@ def quiz_questions(topic: str, user: User = Depends(current_user), db: Session =
     return [{"id": q.id, "question": q.question, "options": q.options} for q in qs]
 
 
-@app.post("/quiz/submit")
+@api_router.post("/quiz/submit")
 def quiz_submit(data: QuizSubmitIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     score, details = 0, []
     for a in data.answers:
@@ -251,7 +302,7 @@ def quiz_submit(data: QuizSubmitIn, user: User = Depends(current_user), db: Sess
     return {"score": score, "total": total, "details": details}
 
 
-@app.get("/performance")
+@api_router.get("/performance")
 def performance(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.query(QuizResult).filter(QuizResult.user_id == user.id).order_by(QuizResult.created_at).all()
     history = [{"topic": r.topic, "score": r.score, "total": r.total,
@@ -265,7 +316,7 @@ def performance(user: User = Depends(current_user), db: Session = Depends(get_db
     return {"average": avg, "attempts": len(history), "history": history, "topics": topics}
 
 
-@app.get("/dashboard")
+@api_router.get("/dashboard")
 def dashboard(user: User = Depends(current_user), db: Session = Depends(get_db)):
     prog = progress(user, db)
     perf = performance(user, db)
@@ -290,7 +341,7 @@ def _fallback_path(p, recs):
     }
 
 
-@app.post("/learning-path/generate")
+@api_router.post("/learning-path/generate")
 def generate_path(user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = _get_profile(db, user)
     if not (p.interests or p.goal or p.weaknesses):
@@ -336,13 +387,13 @@ Return JSON exactly in this shape:
     return path
 
 
-@app.get("/learning-path")
+@api_router.get("/learning-path")
 def get_path(user: User = Depends(current_user), db: Session = Depends(get_db)):
     lp = db.query(LearningPath).filter_by(user_id=user.id).order_by(LearningPath.id.desc()).first()
     return lp.content if lp else None
 
 
-@app.delete("/learning-path")
+@api_router.delete("/learning-path")
 def reset_learning_path(user: User = Depends(current_user), db: Session = Depends(get_db)):
     db.query(LearningPath).filter_by(user_id=user.id).delete(synchronize_session=False)
     db.commit()
@@ -350,7 +401,7 @@ def reset_learning_path(user: User = Depends(current_user), db: Session = Depend
 
 
 # ---------------- RAG CHAT TUTOR ----------------
-@app.post("/chat")
+@api_router.post("/chat")
 def chat(data: ChatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = _get_profile(db, user)
     context = rag.retrieve(db, data.message, k=4)
@@ -366,13 +417,21 @@ Answer clearly and concisely. Prefer the context when relevant; say so if the co
     try:
         answer = api_calling.generate_text(prompt, system="You are LearnAI, a friendly personal tutor.")
     except Exception as e:
-        raise HTTPException(502, f"AI service error: {str(e)[:200]}")
+        if context:
+            answer = (f"Note: AI service is temporarily offline; answering from knowledge base:\n\n"
+                      + "\n\n".join(c["content"] for c in context[:2]))
+        else:
+            raise HTTPException(502, f"AI service error: {str(e)[:200]}")
     return {"answer": answer, "sources": sorted({c["source"] for c in context})}
 
 
-@app.post("/rag/reindex")
+@api_router.post("/rag/reindex")
 def reindex(user: User = Depends(current_user), db: Session = Depends(get_db)):
     from models import KBChunk
     db.query(KBChunk).delete()
     db.commit()
     return rag.ingest_kb(db)
+
+
+app.include_router(api_router)
+app.include_router(api_router, prefix="/api")

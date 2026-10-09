@@ -1,45 +1,116 @@
 if (!getToken()) location.href = "index.html";
 
 const view = document.getElementById("view");
-const titles = { home: "Dashboard", profile: "Student Profile", skills: "Student Skill Form", path: "My AI Learning Path",
-  courses: "Courses", videos: "Video Lectures", quiz: "Quiz", performance: "Performance", progress: "Progress", tutor: "AI Tutor (RAG)", settings: "Settings" };
+const titles = {
+  home: "Dashboard",
+  profile: "Student Profile",
+  skills: "Student Skill Form",
+  recommendations: "Recommendations",
+  path: "My AI Learning Path",
+  courses: "Courses",
+  videos: "Video Lectures",
+  quiz: "Quiz",
+  performance: "Performance",
+  progress: "Progress",
+  tutor: "AI Tutor (RAG)",
+  settings: "Settings"
+};
+
 let charts = [];
-let ME = null;
+
+function getStoredUser() {
+  try {
+    const raw = localStorage.getItem("learnai_user");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return {
+          id: parsed.id || 0,
+          name: parsed.name || "Learner",
+          email: parsed.email || "",
+          profile: parsed.profile || {},
+          joined: parsed.joined || new Date().toISOString()
+        };
+      }
+    }
+  } catch (e) {}
+  return { id: 0, name: "Learner", email: "", profile: {}, joined: new Date().toISOString() };
+}
+
+let ME = getStoredUser();
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const loading = () => (view.innerHTML = '<div class="card"><span class="spinner"></span>Loading...</div>');
-const showErr = e => (view.innerHTML = `<div class="card"><div class="msg err">${esc(e.message)}</div></div>`);
-function flash(el, text, ok = true) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
-function destroyCharts() { charts.forEach(c => c.destroy()); charts = []; }
+const showErr = (e, page = "home") => {
+  view.innerHTML = `
+    <div class="card" style="border-left:4px solid var(--red)">
+      <h3 style="color:var(--red)">Connection Issue</h3>
+      <p style="margin:8px 0;line-height:1.5">${esc(e.message || "Unable to reach the backend service.")}</p>
+      <div class="row" style="margin-top:14px">
+        <button class="btn sm" onclick="go('${page}')">Retry</button>
+        <button class="btn sec sm" onclick="go('settings')">Configure Backend URL</button>
+      </div>
+    </div>`;
+};
+
+function flash(el, text, ok = true) {
+  if (!el) return;
+  el.textContent = text;
+  el.className = "msg " + (ok ? "ok" : "err");
+}
+
+function destroyCharts() {
+  charts.forEach(c => {
+    try { c.destroy(); } catch (err) {}
+  });
+  charts = [];
+}
+
 const SETTINGS_PREFIX = "learnai_settings_";
 const defaultSettings = {
-  photo: "", studentId: "",
+  photo: "",
+  studentId: "",
   notifications: { courses: true, quizzes: true, progress: true, recommendations: true },
-  weeklyGoals: 5, studyHours: 1, targetDate: ""
+  weeklyGoals: 5,
+  studyHours: 1,
+  targetDate: ""
 };
 
 function readSettings() {
-  const saved = localStorage.getItem(SETTINGS_PREFIX + ME.id);
-  if (!saved) return {
-    ...defaultSettings,
-    weeklyGoals: ME.profile.hours_per_week ?? defaultSettings.weeklyGoals,
-    notifications: { ...defaultSettings.notifications }
-  };
-  const parsed = JSON.parse(saved);
-  return {
-    ...defaultSettings,
-    ...parsed,
-    weeklyGoals: ME.profile.hours_per_week ?? defaultSettings.weeklyGoals,
-    notifications: { ...defaultSettings.notifications, ...(parsed.notifications || {}) }
-  };
+  const userId = (ME && ME.id) ? ME.id : 0;
+  const profileHours = (ME && ME.profile && ME.profile.hours_per_week) ? ME.profile.hours_per_week : defaultSettings.weeklyGoals;
+  const saved = localStorage.getItem(SETTINGS_PREFIX + userId);
+  if (!saved) {
+    return {
+      ...defaultSettings,
+      weeklyGoals: profileHours,
+      notifications: { ...defaultSettings.notifications }
+    };
+  }
+  try {
+    const parsed = JSON.parse(saved);
+    return {
+      ...defaultSettings,
+      ...parsed,
+      weeklyGoals: profileHours,
+      notifications: { ...defaultSettings.notifications, ...(parsed.notifications || {}) }
+    };
+  } catch (e) {
+    return { ...defaultSettings, weeklyGoals: profileHours };
+  }
 }
 
 function saveSettings(settings) {
-  localStorage.setItem(SETTINGS_PREFIX + ME.id, JSON.stringify(settings));
+  const userId = (ME && ME.id) ? ME.id : 0;
+  localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(settings));
 }
 
 function settingField(label, id, value, type = "text", attrs = "") {
   return `<div class="setting-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${attrs}></div>`;
+}
+
+function settingToggle(label, id, checked) {
+  return `<label class="settings-toggle" for="${id}"><span>${label}</span><input id="${id}" type="checkbox" ${checked ? "checked" : ""}><span class="toggle-control" aria-hidden="true"></span></label>`;
 }
 
 function syllabusMarkup(course) {
@@ -52,27 +123,54 @@ function syllabusMarkup(course) {
 }
 
 document.getElementById("nav").onclick = e => {
-  const b = e.target.closest("button"); if (b) go(b.dataset.page);
+  const b = e.target.closest("button");
+  if (b && b.dataset.page) go(b.dataset.page);
 };
 
-async function go(page) {
+function getRoutePage() {
+  const hash = (location.hash || "").replace(/^#\/?/, "").toLowerCase();
+  if (hash && pages[hash]) return hash;
+  return "home";
+}
+
+window.addEventListener("hashchange", () => {
+  const target = getRoutePage();
+  go(target, false);
+});
+
+async function go(page, updateHash = true) {
   const renderPage = pages[page];
   if (typeof renderPage !== "function") {
-    showErr(new Error(`The "${page}" page is unavailable. Reload the dashboard and try again.`));
-    return;
+    page = "home";
+  }
+  if (updateHash && location.hash !== "#" + page) {
+    if (history.pushState) {
+      history.pushState(null, "", "#" + page);
+    } else {
+      location.hash = "#" + page;
+    }
   }
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  document.getElementById("pageTitle").textContent = titles[page] || "Dashboard";
-  destroyCharts(); loading();
-  try { await renderPage(); } catch (e) { showErr(e); }
+  const titleEl = document.getElementById("pageTitle");
+  if (titleEl) titleEl.textContent = titles[page] || "Dashboard";
+  destroyCharts();
+  loading();
+  try {
+    await pages[page]();
+  } catch (e) {
+    showErr(e, page);
+  }
 }
 
 const pages = {
   async home() {
     const [d, me] = await Promise.all([api("/dashboard"), api("/me")]);
+    ME = me;
+    if (!ME.profile) ME.profile = {};
+    localStorage.setItem("learnai_user", JSON.stringify(ME));
     const empty = !(me.profile.interests || me.profile.goal);
     view.innerHTML = `
-      ${empty ? `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber)"><b>Get started:</b> fill the <a href="#" onclick="go('skills');return false">Skill Form</a> so AI can build your learning path.</div>` : ""}
+      ${empty ? `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--amber)"><b>Get started:</b> fill the <a href="#skills" onclick="go('skills');return false">Skill Form</a> so AI can build your learning path.</div>` : ""}
       <div class="grid g4">
         <div class="card stat"><div class="num">${d.enrolled}</div><div class="lbl">Courses enrolled</div></div>
         <div class="card stat"><div class="num">${d.overall_progress}%</div><div class="lbl">Overall progress</div></div>
@@ -80,28 +178,71 @@ const pages = {
         <div class="card stat"><div class="num">${d.avg_score}%</div><div class="lbl">Average quiz score</div></div>
       </div>
       <div class="grid g2" style="margin-top:16px">
-        <div class="card"><h3>Your learning path</h3><p class="muted">${d.has_path ? "Your AI learning path is ready." : "No path yet. Generate one from your skill form."}</p><br><button class="btn" onclick="go('path')">Open Learning Path</button></div>
-        <div class="card"><h3>Test yourself</h3><p class="muted">Take a quick quiz to find your weak areas.</p><br><button class="btn sec" onclick="go('quiz')">Start Quiz</button></div>
+        <div class="card">
+          <h3>Your learning path</h3>
+          <p class="muted">${d.has_path ? "Your AI learning path is ready." : "No path yet. Generate one from your skill form."}</p>
+          <br><button class="btn" onclick="go('path')">Open Learning Path</button>
+        </div>
+        <div class="card">
+          <h3>Test yourself</h3>
+          <p class="muted">Take a quick quiz to find your weak areas.</p>
+          <br><button class="btn sec" onclick="go('quiz')">Start Quiz</button>
+        </div>
       </div>`;
+  },
+
+  async recommendations() {
+    const recs = await api("/recommendations");
+    view.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <h3>AI-Powered Course Recommendations</h3>
+        <p class="muted">Courses tailored to your interests, weaknesses, hobbies, and learning goals.</p>
+      </div>
+      ${recs.length ? `
+      <div class="grid g3">${recs.map(c => `
+        <div class="card">
+          <div class="row space"><h3>${esc(c.title)}</h3></div>
+          <span class="tag lvl">${esc(c.level)}</span><span class="tag">${esc(c.category)}</span><span class="tag">${c.duration_hours}h</span>
+          ${c.score ? `<span class="tag" style="background:#dcfce7;color:#166534">★ Score: ${c.score}</span>` : ""}
+          <p class="muted" style="margin:10px 0">${esc(c.description)}</p>
+          ${c.reason ? `<div style="margin:8px 0;font-size:.85rem;color:var(--primary);background:#eef2ff;padding:6px 10px;border-radius:6px">💡 <b>Why:</b> ${esc(c.reason)}</div>` : ""}
+          ${syllabusMarkup(c)}
+          ${c.enrolled ? `<div class="bar"><div style="width:${c.progress}%"></div></div><span class="muted">${c.progress}% complete</span>`
+            : `<button class="btn sm" onclick="enroll(${c.id}, 'recommendations')">Enroll</button>`}
+        </div>`).join("")}
+      </div>` : `<div class="card"><p class="muted">No course recommendations found yet. Fill out your <a href="#skills" onclick="go('skills');return false">Skill Form</a> to generate recommendations.</p></div>`}`;
   },
 
   async settings() {
     const settings = readSettings();
     const theme = applyTheme();
+    const currentApiUrl = getApiUrl();
     view.innerHTML = `
       <div class="settings-page">
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🔌</span><div><h2>Backend Connection</h2><p class="muted">Configure your FastAPI backend API URL for local and production use.</p></div></div>
+          <div class="settings-fields">
+            ${settingField("Backend API URL", "backendApiUrl", currentApiUrl, "url", 'placeholder="http://127.0.0.1:8000 or https://your-backend.onrender.com"')}
+          </div>
+          <div class="row settings-actions" style="margin-top:14px">
+            <button class="btn" id="saveApiUrl">Save Backend URL</button>
+            <button class="btn sec" id="testApiUrl">Test Connection</button>
+            <span id="apiStatus" class="settings-status" role="status"></span>
+          </div>
+        </section>
+
         <section class="card settings-card">
           <div class="settings-heading"><span>👤</span><div><h2>Account</h2><p class="muted">Edit your account details and student ID.</p></div></div>
           <div class="settings-account">
             <div class="settings-photo">
               <strong>Profile Photo</strong>
               <img id="settingsPhoto" class="${settings.photo ? "" : "hidden"}" src="${esc(settings.photo)}" alt="Profile photo">
-              <span id="photoPlaceholder" class="${settings.photo ? "hidden" : ""}">${esc((ME.name || "?").slice(0, 1).toUpperCase())}</span>
+              <span id="photoPlaceholder" class="${settings.photo ? "hidden" : ""}">${esc(((ME && ME.name) || "?").slice(0, 1).toUpperCase())}</span>
               <label class="btn sec sm" for="photoInput">Edit photo</label><input class="hidden" id="photoInput" type="file" accept="image/*">
             </div>
             <div class="settings-fields">
-              ${settingField("Name", "accountName", ME.name)}
-              ${settingField("Email", "accountEmail", ME.email, "email")}
+              ${settingField("Name", "accountName", (ME && ME.name) || "")}
+              ${settingField("Email", "accountEmail", (ME && ME.email) || "", "email")}
               ${settingField("Student ID", "studentId", settings.studentId)}
             </div>
           </div>
@@ -171,17 +312,43 @@ const pages = {
             <button class="btn danger-btn" id="deleteAccount">Delete Account</button></div>
           <p id="deleteStatus" class="settings-status" role="status"></p>
         </section>
-        <div class="settings-footer"><p class="muted">Academic, notification, daily study, and date preferences are saved in this browser. Weekly hours update your learning profile.</p><button class="btn" id="saveSettings">Save Settings</button></div>
+        <div class="settings-footer"><p class="muted">Preferences saved in this browser. Weekly hours update your learning profile.</p><button class="btn" id="saveSettings">Save Settings</button></div>
         <p id="settingsStatus" class="settings-status" role="status" aria-live="polite"></p>
       </div>`;
-
-    function settingToggle(label, id, checked) {
-      return `<label class="settings-toggle" for="${id}"><span>${label}</span><input id="${id}" type="checkbox" ${checked ? "checked" : ""}><span class="toggle-control" aria-hidden="true"></span></label>`;
-    }
 
     const formValue = id => document.getElementById(id).value.trim();
     const accountStatus = document.getElementById("accountStatus");
     const settingsStatus = document.getElementById("settingsStatus");
+    const apiStatus = document.getElementById("apiStatus");
+
+    document.getElementById("saveApiUrl").onclick = () => {
+      const url = formValue("backendApiUrl");
+      setApiUrl(url);
+      flash(apiStatus, `Backend URL set to: ${getApiUrl() || "(default local)"}`);
+      const notice = document.getElementById("apiNotice");
+      if (notice) notice.style.display = getApiUrl() ? "none" : "block";
+    };
+
+    document.getElementById("testApiUrl").onclick = async () => {
+      const btn = document.getElementById("testApiUrl");
+      btn.disabled = true;
+      flash(apiStatus, "Testing connection...");
+      try {
+        const testUrl = (formValue("backendApiUrl") || getApiUrl()).replace(/\/+$/, "");
+        const res = await fetch(`${testUrl}/health`, { method: "GET" });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.status === "ok") {
+          flash(apiStatus, "Connection successful! Backend is online.");
+        } else {
+          flash(apiStatus, `Backend returned HTTP ${res.status}`, false);
+        }
+      } catch (err) {
+        flash(apiStatus, `Connection failed: ${err.message}`, false);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
     document.getElementById("saveAccount").onclick = async () => {
       const button = document.getElementById("saveAccount");
       button.disabled = true;
@@ -228,6 +395,7 @@ const pages = {
         flash(settingsStatus, error.message, false);
       }
     };
+
     document.getElementById("themeSelect").onchange = event => {
       try {
         setTheme(event.target.value);
@@ -251,12 +419,13 @@ const pages = {
         flash(status, error.message, false);
       }
     };
-    document.getElementById("logoutDevice").onclick = logout;
-    document.getElementById("logoutAccount").onclick = logout;
+
+    document.getElementById("logoutDevice").onclick = () => logout();
+    document.getElementById("logoutAccount").onclick = () => logout();
 
     document.getElementById("resetRecommendations").onclick = async () => {
       const status = document.getElementById("resetStatus");
-      if (!confirm(translateText("Reset your generated learning recommendations?"))) return;
+      if (!confirm("Reset your generated learning recommendations?")) return;
       try {
         await api("/learning-path", "DELETE");
         flash(status, "Recommendations reset.");
@@ -264,12 +433,14 @@ const pages = {
         flash(status, error.message, false);
       }
     };
+
     document.getElementById("resetPreferences").onclick = async () => {
       const status = document.getElementById("resetStatus");
-      if (!confirm(translateText("Reset your learning style and study preferences?"))) return;
+      if (!confirm("Reset your learning style and study preferences?")) return;
       try {
-        await api("/profile", "PUT", { ...ME.profile, learning_style: "", hours_per_week: 5 });
-        ME.profile = { ...ME.profile, learning_style: "", hours_per_week: 5 };
+        const curProfile = (ME && ME.profile) ? ME.profile : {};
+        await api("/profile", "PUT", { ...curProfile, learning_style: "", hours_per_week: 5 });
+        ME.profile = { ...curProfile, learning_style: "", hours_per_week: 5 };
         settings.weeklyGoals = defaultSettings.weeklyGoals;
         settings.studyHours = defaultSettings.studyHours;
         settings.targetDate = defaultSettings.targetDate;
@@ -279,6 +450,7 @@ const pages = {
         flash(status, error.message, false);
       }
     };
+
     document.getElementById("deleteAccount").onclick = async () => {
       const status = document.getElementById("deleteStatus");
       const password = document.getElementById("deletePassword").value;
@@ -286,10 +458,10 @@ const pages = {
         flash(status, "Enter your password to delete the account.", false);
         return;
       }
-      if (!confirm(translateText("This permanently deletes your account, learning history, quiz results, and learning paths. Continue?"))) return;
+      if (!confirm("This permanently deletes your account, learning history, quiz results, and learning paths. Continue?")) return;
       try {
         await api("/account", "DELETE", { password });
-        localStorage.removeItem(SETTINGS_PREFIX + ME.id);
+        localStorage.removeItem(SETTINGS_PREFIX + (ME ? ME.id : 0));
         logout();
       } catch (error) {
         flash(status, error.message, false);
@@ -316,7 +488,8 @@ const pages = {
           progress: document.getElementById("notifyProgress").checked,
           recommendations: document.getElementById("notifyRecommendations").checked
         };
-        ME.profile = await api("/profile", "PUT", { ...ME.profile, hours_per_week: settings.weeklyGoals });
+        const curProfile = (ME && ME.profile) ? ME.profile : {};
+        ME.profile = await api("/profile", "PUT", { ...curProfile, hours_per_week: settings.weeklyGoals });
         saveSettings(settings);
         flash(settingsStatus, "Changes saved.");
       } catch (error) {
@@ -328,19 +501,27 @@ const pages = {
   },
 
   async profile() {
-    const me = await api("/me"); const p = me.profile;
+    const me = await api("/me");
+    ME = me;
+    if (!ME.profile) ME.profile = {};
+    const p = me.profile;
     const row = (k, v) => `<tr><th style="width:180px">${k}</th><td>${esc(v) || '<span class="muted">Not filled</span>'}</td></tr>`;
+    const initial = esc(((me.name && me.name[0]) || "U").toUpperCase());
+    const joinedDate = esc((me.joined || "").slice(0, 10));
     view.innerHTML = `
       <div class="card"><div class="row" style="gap:18px;margin-bottom:14px">
-        <div class="avatar">${esc(me.name[0].toUpperCase())}</div>
-        <div><h2>${esc(me.name)}</h2><div class="muted">${esc(me.email)}</div><div class="muted">Joined ${esc(me.joined.slice(0, 10))}</div></div></div>
+        <div class="avatar">${initial}</div>
+        <div><h2>${esc(me.name)}</h2><div class="muted">${esc(me.email)}</div><div class="muted">Joined ${joinedDate}</div></div></div>
         <table>${row("Education", p.education_level)}${row("Goal", p.goal)}${row("Interests", p.interests)}${row("Strengths", p.strengths)}
         ${row("Weaknesses", p.weaknesses)}${row("Hobbies", p.hobbies)}${row("Learning style", p.learning_style)}${row("Hours / week", p.hours_per_week)}</table>
         <br><button class="btn" onclick="go('skills')">Edit in Skill Form</button></div>`;
   },
 
   async skills() {
-    const p = (await api("/me")).profile;
+    const me = await api("/me");
+    ME = me;
+    if (!ME.profile) ME.profile = {};
+    const p = me.profile;
     view.innerHTML = `
       <div class="card"><p class="muted">Tell us about yourself. Separate multiple items with commas.</p>
       <div class="grid g2">
@@ -355,16 +536,37 @@ const pages = {
       <label>Study hours per week</label><input id="f_hours" type="number" min="1" max="80" value="${p.hours_per_week || 5}">
       <div class="row" style="margin-top:18px"><button class="btn" id="saveBtn">Save</button><button class="btn sec" id="genBtn">Save &amp; Generate AI Learning Path</button></div>
       <div id="fmsg" class="msg"></div></div>`;
+
     const save = async () => {
       const g = id => document.getElementById(id).value;
-      await api("/profile", "PUT", { education_level: g("f_edu"), goal: g("f_goal"), interests: g("f_int"), strengths: g("f_str"),
-        weaknesses: g("f_weak"), hobbies: g("f_hob"), learning_style: g("f_style"), hours_per_week: parseInt(g("f_hours")) || 5 });
+      const updatedProfile = await api("/profile", "PUT", {
+        education_level: g("f_edu"),
+        goal: g("f_goal"),
+        interests: g("f_int"),
+        strengths: g("f_str"),
+        weaknesses: g("f_weak"),
+        hobbies: g("f_hob"),
+        learning_style: g("f_style"),
+        hours_per_week: parseInt(g("f_hours")) || 5
+      });
+      ME.profile = updatedProfile;
+      localStorage.setItem("learnai_user", JSON.stringify(ME));
     };
+
     const msg = document.getElementById("fmsg");
-    document.getElementById("saveBtn").onclick = async () => { try { await save(); flash(msg, "Saved!"); } catch (e) { flash(msg, e.message, false); } };
-    document.getElementById("genBtn").onclick = async () => {
-      try { await save(); go("path"); setTimeout(() => document.getElementById("regen") && document.getElementById("regen").click(), 300); }
+    document.getElementById("saveBtn").onclick = async () => {
+      try { await save(); flash(msg, "Saved successfully!"); }
       catch (e) { flash(msg, e.message, false); }
+    };
+    document.getElementById("genBtn").onclick = async () => {
+      try {
+        await save();
+        go("path");
+        setTimeout(() => {
+          const r = document.getElementById("regen");
+          if (r) r.click();
+        }, 300);
+      } catch (e) { flash(msg, e.message, false); }
     };
   },
 
@@ -407,7 +609,10 @@ const pages = {
 
   async performance() {
     const d = await api("/performance");
-    if (!d.attempts) { view.innerHTML = `<div class="card">No quizzes taken yet. Take a quiz to see your performance.</div>`; return; }
+    if (!d.attempts) {
+      view.innerHTML = `<div class="card">No quizzes taken yet. Take a quiz to see your performance.</div>`;
+      return;
+    }
     view.innerHTML = `
       <div class="grid g4"><div class="card stat"><div class="num">${d.average}%</div><div class="lbl">Average score</div></div>
       <div class="card stat"><div class="num">${d.attempts}</div><div class="lbl">Attempts</div></div></div>
@@ -416,12 +621,31 @@ const pages = {
         <div class="card"><h3>Score trend</h3><canvas id="c2"></canvas></div></div>
       <div class="card" style="margin-top:16px"><h3>History</h3><table><tr><th>Date</th><th>Topic</th><th>Score</th></tr>
       ${d.history.slice().reverse().map(h => `<tr><td>${esc(h.date)}</td><td>${esc(h.topic)}</td><td>${h.score}/${h.total} (${h.percent}%)</td></tr>`).join("")}</table></div>`;
-    charts.push(new Chart(document.getElementById("c1"), { type: "bar",
-      data: { labels: d.topics.map(t => t.topic), datasets: [{ label: translateText("Average %"), data: d.topics.map(t => t.average), backgroundColor: "#6366f1" }] },
-      options: { scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } } }));
-    charts.push(new Chart(document.getElementById("c2"), { type: "line",
-      data: { labels: d.history.map((h, i) => "#" + (i + 1)), datasets: [{ label: translateText("Score %"), data: d.history.map(h => h.percent), borderColor: "#10b981", tension: .3 }] },
-      options: { scales: { y: { min: 0, max: 100 } } } }));
+
+    if (typeof Chart !== "undefined") {
+      const c1El = document.getElementById("c1");
+      const c2El = document.getElementById("c2");
+      if (c1El) {
+        charts.push(new Chart(c1El, {
+          type: "bar",
+          data: {
+            labels: d.topics.map(t => t.topic),
+            datasets: [{ label: "Average %", data: d.topics.map(t => t.average), backgroundColor: "#6366f1" }]
+          },
+          options: { scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
+        }));
+      }
+      if (c2El) {
+        charts.push(new Chart(c2El, {
+          type: "line",
+          data: {
+            labels: d.history.map((h, i) => "#" + (i + 1)),
+            datasets: [{ label: "Score %", data: d.history.map(h => h.percent), borderColor: "#10b981", tension: 0.3 }]
+          },
+          options: { scales: { y: { min: 0, max: 100 } } }
+        }));
+      }
+    }
   },
 
   async progress() {
@@ -472,8 +696,9 @@ const pages = {
   },
 
   async tutor() {
+    const userName = (ME && ME.name) ? ME.name : "Learner";
     view.innerHTML = `<div class="card"><p class="muted">Ask anything about learning, roadmaps, study tips. Answers use the knowledge base (RAG) plus AI.</p><br>
-      <div class="chat-box" id="chat"><div class="bubble ai">Hi ${esc(JSON.parse(localStorage.getItem("learnai_user") || "{}").name || "")}! What would you like to learn today?</div></div>
+      <div class="chat-box" id="chat"><div class="bubble ai">Hi ${esc(userName)}! What would you like to learn today?</div></div>
       <div class="row"><input id="chatIn" placeholder="e.g. How do I start learning machine learning?" style="flex:1"><button class="btn" id="chatBtn">Send</button></div></div>`;
     const send = async () => {
       const inp = document.getElementById("chatIn"), box = document.getElementById("chat"), text = inp.value.trim();
@@ -483,13 +708,16 @@ const pages = {
       box.appendChild(wait); box.scrollTop = box.scrollHeight;
       try {
         const r = await api("/chat", "POST", { message: text });
-        wait.textContent = r.answer + (r.sources.length ? "\n\n📎 Sources: " + r.sources.join(", ") : "");
-      } catch (e) { wait.textContent = "⚠ " + e.message; }
+        const sourcesText = (r.sources && r.sources.length) ? "\n\n📎 Sources: " + r.sources.join(", ") : "";
+        wait.textContent = r.answer + sourcesText;
+      } catch (e) {
+        wait.textContent = "⚠ " + e.message;
+      }
       box.scrollTop = box.scrollHeight;
     };
     document.getElementById("chatBtn").onclick = send;
     document.getElementById("chatIn").onkeydown = e => { if (e.key === "Enter") send(); };
-  },
+  }
 };
 
 function renderPath(path) {
@@ -498,7 +726,7 @@ function renderPath(path) {
     <div class="card"><div class="row space"><div><h3>Personalized learning path</h3><p class="muted">Built by AI from your skill form, quiz results and the RAG knowledge base.</p></div>
     <button class="btn" id="regen">${path ? "Regenerate" : "Generate with AI"}</button></div><div id="pmsg" class="msg"></div></div>
     ${path ? `<div class="card" style="margin-top:16px">
-      ${path.ai === false ? `<div class="msg err" style="display:block;margin-bottom:12px">AI unavailable (${esc(path.error || "")}). Showing a basic rule-based path. Check GOOGLE_API_KEY in backend/.env.</div>` : ""}
+      ${path.ai === false ? `<div class="msg err" style="display:block;margin-bottom:12px">AI unavailable (${esc(path.error || "")}). Showing a rule-based path. Check GOOGLE_API_KEY in backend/.env.</div>` : ""}
       <p style="margin-bottom:18px">${esc(path.summary)}</p>
       ${weeks.map(w => `<div class="week"><h4>Week ${esc(w.week)}: ${esc(w.title)}</h4>
         ${w.hours ? `<span class="tag">${esc(w.hours)} hrs</span>` : ""}
@@ -508,25 +736,43 @@ function renderPath(path) {
       ${(path.tips || []).length ? `<h4>Tips</h4><ul style="margin-left:18px">${path.tips.map(t => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
       ${(path.sources || []).length ? `<p class="muted" style="margin-top:12px">📎 Knowledge sources: ${path.sources.map(esc).join(", ")}</p>` : ""}
     </div>` : ""}`;
+
   document.getElementById("regen").onclick = async function () {
     this.disabled = true; this.innerHTML = '<span class="spinner"></span>AI is thinking...';
-    try { renderPath(await api("/learning-path/generate", "POST")); }
-    catch (e) { this.disabled = false; this.textContent = "Generate with AI"; flash(document.getElementById("pmsg"), e.message, false); }
+    try {
+      renderPath(await api("/learning-path/generate", "POST"));
+    } catch (e) {
+      this.disabled = false;
+      this.textContent = "Generate with AI";
+      flash(document.getElementById("pmsg"), e.message, false);
+    }
   };
 }
 
 async function enroll(id, page) {
-  try { await api(`/courses/${id}/enroll`, "POST"); go(page); } catch (e) { alert(e.message); }
+  try {
+    await api(`/courses/${id}/enroll`, "POST");
+    go(page);
+  } catch (e) {
+    alert(e.message);
+  }
 }
+
 async function setProgress(id, v) {
-  try { await api(`/progress/${id}`, "PUT", { progress: parseInt(v) }); go("progress"); } catch (e) { alert(e.message); }
+  try {
+    await api(`/progress/${id}`, "PUT", { progress: parseInt(v) });
+    go("progress");
+  } catch (e) {
+    alert(e.message);
+  }
 }
+
 async function editProgress(id, current) {
-  const value = prompt(translateText("Update course completion (0–100):"), current);
+  const value = prompt("Update course completion (0–100):", current);
   if (value === null) return;
   const progress = Number(value);
   if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
-    alert(translateText("Enter a whole number from 0 to 100."));
+    alert("Enter a whole number from 0 to 100.");
     return;
   }
   await setProgress(id, progress);
@@ -540,18 +786,42 @@ async function startQuiz(topic) {
     <div class="quiz-q"><b>${i + 1}. ${esc(q.question)}</b>
     ${q.options.map((o, j) => `<label class="opt"><input type="radio" name="q${q.id}" value="${j}">${esc(o)}</label>`).join("")}</div>`).join("")}
     <button class="btn" id="qsub">Submit</button><div id="qres"></div></div>`;
+
   document.getElementById("qsub").onclick = async () => {
-    const answers = qs.map(q => { const c = document.querySelector(`input[name="q${q.id}"]:checked`); return { question_id: q.id, selected: c ? parseInt(c.value) : -1 }; });
-    if (answers.some(a => a.selected < 0) && !confirm(translateText("Some questions are unanswered. Submit anyway?"))) return;
+    const answers = qs.map(q => {
+      const c = document.querySelector(`input[name="q${q.id}"]:checked`);
+      return { question_id: q.id, selected: c ? parseInt(c.value) : -1 };
+    });
+    if (answers.some(a => a.selected < 0) && !confirm("Some questions are unanswered. Submit anyway?")) return;
     const r = await api("/quiz/submit", "POST", { topic, answers });
     document.getElementById("qsub").classList.add("hidden");
-    document.getElementById("qres").innerHTML = `<h3 style="margin:16px 0">Score: ${r.score}/${r.total} (${Math.round(100 * r.score / r.total)}%)</h3>` +
+    const pct = r.total ? Math.round(100 * r.score / r.total) : 0;
+    document.getElementById("qres").innerHTML = `<h3 style="margin:16px 0">Score: ${r.score}/${r.total} (${pct}%)</h3>` +
       r.details.map(d => `<div class="${d.correct ? "res-ok" : "res-bad"}"><b>${esc(d.question)}</b><br>
         ${d.correct ? "✔ Correct" : `✘ Your answer: ${esc(d.your_answer || "none")} — Correct: ${esc(d.right_answer)}`}<br><span class="muted">${esc(d.explanation)}</span></div>`).join("");
   };
 }
 
 (async () => {
-  try { ME = await api("/me"); document.getElementById("hello").textContent = "Hi, " + ME.name + " 👋"; } catch (e) { /* handled in api() */ }
-  go("home");
+  // Check backend configuration
+  if (!getApiUrl() && !isLocalHost()) {
+    const notice = document.getElementById("apiNotice");
+    if (notice) notice.style.display = "block";
+  }
+
+  try {
+    ME = await api("/me");
+    if (!ME.profile) ME.profile = {};
+    localStorage.setItem("learnai_user", JSON.stringify(ME));
+    const hello = document.getElementById("hello");
+    if (hello) hello.textContent = "Hi, " + ME.name + " 👋";
+  } catch (e) {
+    // If backend is not reached, use cached user profile
+    ME = getStoredUser();
+    const hello = document.getElementById("hello");
+    if (hello && ME.name) hello.textContent = "Hi, " + ME.name + " 👋";
+  }
+
+  const initial = getRoutePage();
+  go(initial, false);
 })();

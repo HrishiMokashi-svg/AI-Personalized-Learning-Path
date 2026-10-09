@@ -1,23 +1,19 @@
 @echo off
 title LearnAI Frontend
 cd /d "%~dp0"
-where python >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] Python is not installed or not in path.
-  pause
-  exit /b 1
-)
-echo 
-==========================================
-=
+
+echo ==========================================
 echo   LearnAI Frontend
-echo
-==========================================
-echo   Frontend: http://127.0.0.1:5500 
-echo   Backend:  http://127.0.0.1:8000
-echo 
-==========================================
-=
+echo ==========================================
+echo   Frontend: http://127.0.0.1:5500/
+echo   Backend:  http://127.0.0.1:8000/
+echo ==========================================
+
 start "" http://127.0.0.1:5500/index.html
-python -m http.server 5500 --bind 127.0.0.1
+
+if exist "..\Backend\.venv\Scripts\python.exe" (
+  ..\Backend\.venv\Scripts\python.exe -m http.server 5500 --bind 127.0.0.1
+) else (
+  python -m http.server 5500 --bind 127.0.0.1
+)
 pause
