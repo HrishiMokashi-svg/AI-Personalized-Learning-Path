@@ -14,7 +14,7 @@ echo   LearnAI Frontend
 echo
 ==========================================
 echo   Frontend: http://127.0.0.1:5500 
-echo   Backend:  http://127.0.0.1:8001
+echo   Backend:  http://127.0.0.1:8000
 echo 
 ==========================================
 =

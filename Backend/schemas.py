@@ -13,6 +13,20 @@ class LoginIn(BaseModel):
     password: str
 
 
+class AccountUpdateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6, max_length=100)
+
+
+class AccountDeleteIn(BaseModel):
+    password: str
+
+
 class ProfileIn(BaseModel):
     education_level: str = ""
     goal: str = ""

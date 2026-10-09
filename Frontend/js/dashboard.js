@@ -2,7 +2,7 @@ if (!getToken()) location.href = "index.html";
 
 const view = document.getElementById("view");
 const titles = { home: "Dashboard", profile: "Student Profile", skills: "Student Skill Form", path: "My AI Learning Path",
-  courses: "Courses", videos: "Video Lectures", quiz: "Quiz", performance: "Performance", progress: "Progress", tutor: "AI Tutor (RAG)" };
+  courses: "Courses", videos: "Video Lectures", quiz: "Quiz", performance: "Performance", progress: "Progress", tutor: "AI Tutor (RAG)", settings: "Settings" };
 let charts = [];
 let ME = null;
 
@@ -11,6 +11,37 @@ const loading = () => (view.innerHTML = '<div class="card"><span class="spinner"
 const showErr = e => (view.innerHTML = `<div class="card"><div class="msg err">${esc(e.message)}</div></div>`);
 function flash(el, text, ok = true) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
 function destroyCharts() { charts.forEach(c => c.destroy()); charts = []; }
+const SETTINGS_PREFIX = "learnai_settings_";
+const defaultSettings = {
+  photo: "", studentId: "",
+  notifications: { courses: true, quizzes: true, progress: true, recommendations: true },
+  weeklyGoals: 5, studyHours: 1, targetDate: ""
+};
+
+function readSettings() {
+  const saved = localStorage.getItem(SETTINGS_PREFIX + ME.id);
+  if (!saved) return {
+    ...defaultSettings,
+    weeklyGoals: ME.profile.hours_per_week ?? defaultSettings.weeklyGoals,
+    notifications: { ...defaultSettings.notifications }
+  };
+  const parsed = JSON.parse(saved);
+  return {
+    ...defaultSettings,
+    ...parsed,
+    weeklyGoals: ME.profile.hours_per_week ?? defaultSettings.weeklyGoals,
+    notifications: { ...defaultSettings.notifications, ...(parsed.notifications || {}) }
+  };
+}
+
+function saveSettings(settings) {
+  localStorage.setItem(SETTINGS_PREFIX + ME.id, JSON.stringify(settings));
+}
+
+function settingField(label, id, value, type = "text", attrs = "") {
+  return `<div class="setting-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${attrs}></div>`;
+}
+
 function syllabusMarkup(course) {
   const syllabus = course.syllabus || [];
   if (!syllabus.length) return "";
@@ -25,10 +56,15 @@ document.getElementById("nav").onclick = e => {
 };
 
 async function go(page) {
+  const renderPage = pages[page];
+  if (typeof renderPage !== "function") {
+    showErr(new Error(`The "${page}" page is unavailable. Reload the dashboard and try again.`));
+    return;
+  }
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  document.getElementById("pageTitle").textContent = titles[page];
+  document.getElementById("pageTitle").textContent = titles[page] || "Dashboard";
   destroyCharts(); loading();
-  try { await pages[page](); } catch (e) { showErr(e); }
+  try { await renderPage(); } catch (e) { showErr(e); }
 }
 
 const pages = {
@@ -47,6 +83,248 @@ const pages = {
         <div class="card"><h3>Your learning path</h3><p class="muted">${d.has_path ? "Your AI learning path is ready." : "No path yet. Generate one from your skill form."}</p><br><button class="btn" onclick="go('path')">Open Learning Path</button></div>
         <div class="card"><h3>Test yourself</h3><p class="muted">Take a quick quiz to find your weak areas.</p><br><button class="btn sec" onclick="go('quiz')">Start Quiz</button></div>
       </div>`;
+  },
+
+  async settings() {
+    const settings = readSettings();
+    const theme = applyTheme();
+    view.innerHTML = `
+      <div class="settings-page">
+        <section class="card settings-card">
+          <div class="settings-heading"><span>👤</span><div><h2>Account</h2><p class="muted">Edit your account details and student ID.</p></div></div>
+          <div class="settings-account">
+            <div class="settings-photo">
+              <strong>Profile Photo</strong>
+              <img id="settingsPhoto" class="${settings.photo ? "" : "hidden"}" src="${esc(settings.photo)}" alt="Profile photo">
+              <span id="photoPlaceholder" class="${settings.photo ? "hidden" : ""}">${esc((ME.name || "?").slice(0, 1).toUpperCase())}</span>
+              <label class="btn sec sm" for="photoInput">Edit photo</label><input class="hidden" id="photoInput" type="file" accept="image/*">
+            </div>
+            <div class="settings-fields">
+              ${settingField("Name", "accountName", ME.name)}
+              ${settingField("Email", "accountEmail", ME.email, "email")}
+              ${settingField("Student ID", "studentId", settings.studentId)}
+            </div>
+          </div>
+          <div class="row settings-actions"><button class="btn" id="saveAccount">Save Account</button><span id="accountStatus" class="settings-status" role="status"></span></div>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🔔</span><div><h2>Notifications</h2><p class="muted">Choose which reminders you prefer.</p></div></div>
+          <div class="settings-options">
+            ${settingToggle("Course reminders", "notifyCourses", settings.notifications.courses)}
+            ${settingToggle("Quiz reminders", "notifyQuizzes", settings.notifications.quizzes)}
+            ${settingToggle("Progress updates", "notifyProgress", settings.notifications.progress)}
+            ${settingToggle("AI recommendations", "notifyRecommendations", settings.notifications.recommendations)}
+          </div>
+          <p class="muted settings-note">Reminder options are saved as preferences. This app does not send notifications yet.</p>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🌐</span><div><h2>Language</h2><p class="muted">The dashboard interface updates when you change this setting.</p></div></div>
+          <div class="settings-row"><label for="languageSelect">Language</label><select id="languageSelect">
+            <option value="en" ${getLanguage() === "en" ? "selected" : ""}>English</option>
+            <option value="mr" ${getLanguage() === "mr" ? "selected" : ""}>Marathi</option>
+            <option value="hi" ${getLanguage() === "hi" ? "selected" : ""}>Hindi</option>
+          </select></div>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🎨</span><div><h2>Appearance</h2><p class="muted">Choose light, dark, or system appearance.</p></div></div>
+          <div class="settings-row"><label for="themeSelect">Theme</label><select id="themeSelect">
+            <option value="light" ${theme === "light" ? "selected" : ""}>Light Mode</option>
+            <option value="dark" ${theme === "dark" ? "selected" : ""}>Dark Mode</option>
+            <option value="system" ${theme === "system" ? "selected" : ""}>System Default</option>
+          </select></div>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🔐</span><div><h2>Privacy &amp; Security</h2><p class="muted">Manage your password and current login.</p></div></div>
+          <form id="passwordForm" class="settings-fields">
+            ${settingField("Current password", "currentPassword", "", "password", 'required autocomplete="current-password"')}
+            ${settingField("New password", "newPassword", "", "password", 'required minlength="6" autocomplete="new-password"')}
+            <div class="setting-field settings-field-action"><label>&nbsp;</label><button class="btn" type="submit">Change Password</button></div>
+          </form>
+          <p id="passwordStatus" class="settings-status" role="status"></p>
+          <div class="settings-row"><div><strong>Login Sessions</strong><p class="muted">Only the current browser session can be signed out here.</p></div><button class="btn sec" id="logoutDevice">Sign out this device</button></div>
+          <div class="settings-row privacy-copy"><div><strong>Data Privacy</strong><p class="muted">Your learning data is stored by LearnAI to provide courses, progress tracking, quizzes, and personalized recommendations.</p></div></div>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>📊</span><div><h2>Progress Settings</h2><p class="muted">Set your study targets.</p></div></div>
+          <div class="settings-fields settings-fields-three">
+            ${settingField("Weekly goals (hours)", "weeklyGoals", settings.weeklyGoals, "number", 'min="1" max="168" required')}
+            ${settingField("Study hours/day", "studyHours", settings.studyHours, "number", 'min="1" max="24" required')}
+            ${settingField("Target completion date", "targetDate", settings.targetDate, "date")}
+          </div>
+        </section>
+
+        <section class="card settings-card">
+          <div class="settings-heading"><span>🔄</span><div><h2>Reset</h2><p class="muted">Reset saved recommendations or learning preferences.</p></div></div>
+          <div class="row"><button class="btn sec" id="resetRecommendations">Reset recommendations</button><button class="btn sec" id="resetPreferences">Reset learning preferences</button></div>
+          <p id="resetStatus" class="settings-status" role="status"></p>
+        </section>
+
+        <section class="card settings-card settings-danger">
+          <div class="settings-heading"><span>🚪</span><div><h2>Account Actions</h2><p class="muted">Sign out or permanently delete your account and learning records.</p></div></div>
+          <div class="row"><button class="btn sec" id="logoutAccount">Logout</button>
+            <input id="deletePassword" type="password" placeholder="Password to confirm deletion" autocomplete="current-password">
+            <button class="btn danger-btn" id="deleteAccount">Delete Account</button></div>
+          <p id="deleteStatus" class="settings-status" role="status"></p>
+        </section>
+        <div class="settings-footer"><p class="muted">Academic, notification, daily study, and date preferences are saved in this browser. Weekly hours update your learning profile.</p><button class="btn" id="saveSettings">Save Settings</button></div>
+        <p id="settingsStatus" class="settings-status" role="status" aria-live="polite"></p>
+      </div>`;
+
+    function settingToggle(label, id, checked) {
+      return `<label class="settings-toggle" for="${id}"><span>${label}</span><input id="${id}" type="checkbox" ${checked ? "checked" : ""}><span class="toggle-control" aria-hidden="true"></span></label>`;
+    }
+
+    const formValue = id => document.getElementById(id).value.trim();
+    const accountStatus = document.getElementById("accountStatus");
+    const settingsStatus = document.getElementById("settingsStatus");
+    document.getElementById("saveAccount").onclick = async () => {
+      const button = document.getElementById("saveAccount");
+      button.disabled = true;
+      try {
+        const updated = await api("/account", "PUT", { name: formValue("accountName"), email: formValue("accountEmail") });
+        ME = { ...ME, ...updated };
+        const session = JSON.parse(localStorage.getItem("learnai_user") || "{}");
+        localStorage.setItem("learnai_user", JSON.stringify({ ...session, ...updated }));
+        document.getElementById("hello").textContent = "Hi, " + ME.name + " 👋";
+        flash(accountStatus, "Account details updated.");
+      } catch (error) {
+        flash(accountStatus, error.message, false);
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    document.getElementById("photoInput").onchange = event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) {
+        event.target.value = "";
+        flash(settingsStatus, "Photo must be an image smaller than 2 MB.", false);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        settings.photo = reader.result;
+        document.getElementById("settingsPhoto").src = settings.photo;
+        document.getElementById("settingsPhoto").classList.remove("hidden");
+        document.getElementById("photoPlaceholder").classList.add("hidden");
+      };
+      reader.onerror = () => flash(settingsStatus, "Could not read the selected photo.", false);
+      reader.readAsDataURL(file);
+    };
+
+    document.getElementById("languageSelect").onchange = event => {
+      try {
+        settings.language = event.target.value;
+        saveSettings(settings);
+        setLanguage(event.target.value);
+        go("settings");
+      } catch (error) {
+        flash(settingsStatus, error.message, false);
+      }
+    };
+    document.getElementById("themeSelect").onchange = event => {
+      try {
+        setTheme(event.target.value);
+        flash(settingsStatus, `${event.target.value === "system" ? "System" : event.target.value === "dark" ? "Dark" : "Light"} theme applied.`);
+      } catch (error) {
+        flash(settingsStatus, error.message, false);
+      }
+    };
+
+    document.getElementById("passwordForm").onsubmit = async event => {
+      event.preventDefault();
+      const status = document.getElementById("passwordStatus");
+      try {
+        await api("/account/password", "PUT", {
+          current_password: document.getElementById("currentPassword").value,
+          new_password: document.getElementById("newPassword").value
+        });
+        event.target.reset();
+        flash(status, "Password updated.");
+      } catch (error) {
+        flash(status, error.message, false);
+      }
+    };
+    document.getElementById("logoutDevice").onclick = logout;
+    document.getElementById("logoutAccount").onclick = logout;
+
+    document.getElementById("resetRecommendations").onclick = async () => {
+      const status = document.getElementById("resetStatus");
+      if (!confirm(translateText("Reset your generated learning recommendations?"))) return;
+      try {
+        await api("/learning-path", "DELETE");
+        flash(status, "Recommendations reset.");
+      } catch (error) {
+        flash(status, error.message, false);
+      }
+    };
+    document.getElementById("resetPreferences").onclick = async () => {
+      const status = document.getElementById("resetStatus");
+      if (!confirm(translateText("Reset your learning style and study preferences?"))) return;
+      try {
+        await api("/profile", "PUT", { ...ME.profile, learning_style: "", hours_per_week: 5 });
+        ME.profile = { ...ME.profile, learning_style: "", hours_per_week: 5 };
+        settings.weeklyGoals = defaultSettings.weeklyGoals;
+        settings.studyHours = defaultSettings.studyHours;
+        settings.targetDate = defaultSettings.targetDate;
+        saveSettings(settings);
+        go("settings");
+      } catch (error) {
+        flash(status, error.message, false);
+      }
+    };
+    document.getElementById("deleteAccount").onclick = async () => {
+      const status = document.getElementById("deleteStatus");
+      const password = document.getElementById("deletePassword").value;
+      if (!password) {
+        flash(status, "Enter your password to delete the account.", false);
+        return;
+      }
+      if (!confirm(translateText("This permanently deletes your account, learning history, quiz results, and learning paths. Continue?"))) return;
+      try {
+        await api("/account", "DELETE", { password });
+        localStorage.removeItem(SETTINGS_PREFIX + ME.id);
+        logout();
+      } catch (error) {
+        flash(status, error.message, false);
+      }
+    };
+
+    document.getElementById("saveSettings").onclick = async () => {
+      const button = document.getElementById("saveSettings");
+      button.disabled = true;
+      try {
+        settings.studentId = formValue("studentId");
+        settings.weeklyGoals = Number(formValue("weeklyGoals"));
+        settings.studyHours = Number(formValue("studyHours"));
+        settings.targetDate = formValue("targetDate");
+        if (!Number.isInteger(settings.weeklyGoals) || settings.weeklyGoals < 1 || settings.weeklyGoals > 168) {
+          throw new Error("Weekly goals must be between 1 and 168 hours.");
+        }
+        if (!Number.isInteger(settings.studyHours) || settings.studyHours < 1 || settings.studyHours > 24) {
+          throw new Error("Study hours per day must be between 1 and 24.");
+        }
+        settings.notifications = {
+          courses: document.getElementById("notifyCourses").checked,
+          quizzes: document.getElementById("notifyQuizzes").checked,
+          progress: document.getElementById("notifyProgress").checked,
+          recommendations: document.getElementById("notifyRecommendations").checked
+        };
+        ME.profile = await api("/profile", "PUT", { ...ME.profile, hours_per_week: settings.weeklyGoals });
+        saveSettings(settings);
+        flash(settingsStatus, "Changes saved.");
+      } catch (error) {
+        flash(settingsStatus, error.message, false);
+      } finally {
+        button.disabled = false;
+      }
+    };
   },
 
   async profile() {
@@ -139,10 +417,10 @@ const pages = {
       <div class="card" style="margin-top:16px"><h3>History</h3><table><tr><th>Date</th><th>Topic</th><th>Score</th></tr>
       ${d.history.slice().reverse().map(h => `<tr><td>${esc(h.date)}</td><td>${esc(h.topic)}</td><td>${h.score}/${h.total} (${h.percent}%)</td></tr>`).join("")}</table></div>`;
     charts.push(new Chart(document.getElementById("c1"), { type: "bar",
-      data: { labels: d.topics.map(t => t.topic), datasets: [{ label: "Average %", data: d.topics.map(t => t.average), backgroundColor: "#6366f1" }] },
+      data: { labels: d.topics.map(t => t.topic), datasets: [{ label: translateText("Average %"), data: d.topics.map(t => t.average), backgroundColor: "#6366f1" }] },
       options: { scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } } }));
     charts.push(new Chart(document.getElementById("c2"), { type: "line",
-      data: { labels: d.history.map((h, i) => "#" + (i + 1)), datasets: [{ label: "Score %", data: d.history.map(h => h.percent), borderColor: "#10b981", tension: .3 }] },
+      data: { labels: d.history.map((h, i) => "#" + (i + 1)), datasets: [{ label: translateText("Score %"), data: d.history.map(h => h.percent), borderColor: "#10b981", tension: .3 }] },
       options: { scales: { y: { min: 0, max: 100 } } } }));
   },
 
@@ -244,11 +522,11 @@ async function setProgress(id, v) {
   try { await api(`/progress/${id}`, "PUT", { progress: parseInt(v) }); go("progress"); } catch (e) { alert(e.message); }
 }
 async function editProgress(id, current) {
-  const value = prompt("Update course completion (0–100):", current);
+  const value = prompt(translateText("Update course completion (0–100):"), current);
   if (value === null) return;
   const progress = Number(value);
   if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
-    alert("Enter a whole number from 0 to 100.");
+    alert(translateText("Enter a whole number from 0 to 100."));
     return;
   }
   await setProgress(id, progress);
@@ -264,7 +542,7 @@ async function startQuiz(topic) {
     <button class="btn" id="qsub">Submit</button><div id="qres"></div></div>`;
   document.getElementById("qsub").onclick = async () => {
     const answers = qs.map(q => { const c = document.querySelector(`input[name="q${q.id}"]:checked`); return { question_id: q.id, selected: c ? parseInt(c.value) : -1 }; });
-    if (answers.some(a => a.selected < 0) && !confirm("Some questions are unanswered. Submit anyway?")) return;
+    if (answers.some(a => a.selected < 0) && !confirm(translateText("Some questions are unanswered. Submit anyway?"))) return;
     const r = await api("/quiz/submit", "POST", { topic, answers });
     document.getElementById("qsub").classList.add("hidden");
     document.getElementById("qres").innerHTML = `<h3 style="margin:16px 0">Score: ${r.score}/${r.total} (${Math.round(100 * r.score / r.total)}%)</h3>` +

@@ -12,7 +12,8 @@ from auth import create_token, current_user, hash_password, verify_password
 from database import Base, SessionLocal, engine, get_db
 from models import (Course, Enrollment, LearningPath, QuizQuestion,
                     QuizResult, StudentProfile, User)
-from schemas import (ChatIn, LoginIn, ProfileIn, ProgressIn, QuizSubmitIn,
+from schemas import (AccountDeleteIn, AccountUpdateIn, ChatIn, LoginIn,
+                     PasswordChangeIn, ProfileIn, ProgressIn, QuizSubmitIn,
                      RegisterIn)
 from seed import seed
 
@@ -65,6 +66,44 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
     return {"token": create_token(user.id), "user": {"id": user.id, "name": user.name, "email": user.email}}
+
+
+@app.put("/account")
+def update_account(data: AccountUpdateIn, user: User = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    name = data.name.strip()
+    if len(name) < 2:
+        raise HTTPException(400, "Name must contain at least 2 characters")
+    user.name = name
+    user.email = data.email.lower()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "Email already registered")
+    return {"id": user.id, "name": user.name, "email": user.email}
+
+
+@app.put("/account/password")
+def change_password(data: PasswordChangeIn, user: User = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(400, "Current password is incorrect")
+    user.password_hash = hash_password(data.new_password)
+    db.commit()
+    return {"message": "Password updated"}
+
+
+@app.delete("/account")
+def delete_account(data: AccountDeleteIn, user: User = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(400, "Password is incorrect")
+    for model in (LearningPath, QuizResult, Enrollment, StudentProfile):
+        db.query(model).filter(model.user_id == user.id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    return {"message": "Account deleted"}
 
 
 # ---------------- PROFILE / SKILL FORM ----------------
@@ -301,6 +340,13 @@ Return JSON exactly in this shape:
 def get_path(user: User = Depends(current_user), db: Session = Depends(get_db)):
     lp = db.query(LearningPath).filter_by(user_id=user.id).order_by(LearningPath.id.desc()).first()
     return lp.content if lp else None
+
+
+@app.delete("/learning-path")
+def reset_learning_path(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    db.query(LearningPath).filter_by(user_id=user.id).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Learning recommendations reset"}
 
 
 # ---------------- RAG CHAT TUTOR ----------------
